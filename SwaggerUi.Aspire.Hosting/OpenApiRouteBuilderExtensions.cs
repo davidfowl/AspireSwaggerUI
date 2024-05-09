@@ -7,7 +7,7 @@ internal static class OpenApiRouteBuilderExtensions
     /// <summary>
     ///  Helper method to render Swagger UI view for testing.
     /// </summary>
-    public static IEndpointConventionBuilder MapSwaggerUi(this IEndpointRouteBuilder endpoints)
+    public static IEndpointConventionBuilder MapSwaggerUI(this IEndpointRouteBuilder endpoints)
     {
         return endpoints.MapGet("/swagger/{resourceName}/{documentName}", (string resourceName, string documentName) => Results.Content($$"""
     <html>

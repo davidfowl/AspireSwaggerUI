@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Yarp.ReverseProxy.Forwarder;
 
-public static class SwaggerUiExtensions
+public static class SwaggerUIExtensions
 {
     /// <summary>
     /// Maps the swagger ui endpoint to the application.
@@ -19,14 +19,14 @@ public static class SwaggerUiExtensions
     /// <param name="documentNames">The list of open api documents. Defaults to "v1" if null.</param>
     /// <param name="path">The path to the open api document.</param>
     /// <param name="endpointName">The endpoint name</param>
-    public static IResourceBuilder<ProjectResource> WithSwaggerUi(this IResourceBuilder<ProjectResource> builder,
+    public static IResourceBuilder<ProjectResource> WithSwaggerUI(this IResourceBuilder<ProjectResource> builder,
         string[]? documentNames = null, string path = "swagger/v1/swagger.json", string endpointName = "http")
     {
-        if (!builder.ApplicationBuilder.Resources.OfType<SwaggerUiResource>().Any())
+        if (!builder.ApplicationBuilder.Resources.OfType<SwaggerUIResource>().Any())
         {
             // Add the swagger ui code hook and resource
             builder.ApplicationBuilder.Services.TryAddLifecycleHook<SwaggerUiHook>();
-            builder.ApplicationBuilder.AddResource(new SwaggerUiResource("swagger-ui"))
+            builder.ApplicationBuilder.AddResource(new SwaggerUIResource("swagger-ui"))
                 .WithInitialState(new CustomResourceSnapshot
                 {
                     ResourceType = "swagger-ui",
@@ -36,7 +36,7 @@ public static class SwaggerUiExtensions
                 .ExcludeFromManifest();
         }
 
-        return builder.WithAnnotation(new SwaggerUiAnnotation(documentNames ?? ["v1"], path, builder.GetEndpoint(endpointName)));
+        return builder.WithAnnotation(new SwaggerUIAnnotation(documentNames ?? ["v1"], path, builder.GetEndpoint(endpointName)));
     }
 
     class SwaggerUiHook(ResourceNotificationService notificationService,
@@ -44,7 +44,7 @@ public static class SwaggerUiExtensions
     {
         public async Task AfterEndpointsAllocatedAsync(DistributedApplicationModel appModel, CancellationToken cancellationToken = default)
         {
-            var openApiResource = appModel.Resources.OfType<SwaggerUiResource>().SingleOrDefault();
+            var openApiResource = appModel.Resources.OfType<SwaggerUIResource>().SingleOrDefault();
 
             if (openApiResource is null)
             {
@@ -62,7 +62,7 @@ public static class SwaggerUiExtensions
             var app = builder.Build();
 
             // openapi/resourcename/documentname.json
-            app.MapSwaggerUi();
+            app.MapSwaggerUI();
 
             var swaggerUiPaths = new List<string>();
             var resourceToEndpoint = new Dictionary<string, (string, string)>();
@@ -70,7 +70,7 @@ public static class SwaggerUiExtensions
 
             foreach (var r in appModel.Resources)
             {
-                if (!r.TryGetLastAnnotation<SwaggerUiAnnotation>(out var annotation))
+                if (!r.TryGetLastAnnotation<SwaggerUIAnnotation>(out var annotation))
                 {
                     continue;
                 }

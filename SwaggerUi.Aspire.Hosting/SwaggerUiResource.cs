@@ -1,6 +1,6 @@
 ﻿using Aspire.Hosting.ApplicationModel;
 
-public class SwaggerUiResource(string name) : Resource(name)
+public class SwaggerUIResource(string name) : Resource(name)
 {
 
 }
