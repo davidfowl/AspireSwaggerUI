@@ -1,4 +1,5 @@
-﻿using Aspire.Hosting;
+﻿using System.Collections.Immutable;
+using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Lifecycle;
 using Microsoft.AspNetCore.Builder;
@@ -64,9 +65,8 @@ public static class SwaggerUIExtensions
             // openapi/resourcename/documentname.json
             app.MapSwaggerUI();
 
-            var swaggerUiPaths = new List<string>();
             var resourceToEndpoint = new Dictionary<string, (string, string)>();
-            var hostToResourceUrl = new Dictionary<int, string>();
+            var portToResourceMap = new Dictionary<int, (string, List<string>)>();
 
             foreach (var r in appModel.Resources)
             {
@@ -78,18 +78,19 @@ public static class SwaggerUIExtensions
                 // We store the url and path for each resource so we can hit the open api endpoint
                 resourceToEndpoint[r.Name] = (annotation.EndpointReference.Url, annotation.Path);
 
+                var paths = new List<string>();
+                // To avoid cors issues, we expose URLs that send requests to the apphost and then forward them to the actual resource
+                foreach (var documentName in annotation.DocumentNames)
+                {
+                    paths.Add($"swagger/{r.Name}/{documentName}");
+                }
+
                 // We store the URL for the resource on the host so we can map it back to the actual address once they are allocated
-                hostToResourceUrl[app.Urls.Count] = annotation.EndpointReference.Url;
+                portToResourceMap[app.Urls.Count] = (annotation.EndpointReference.Url, paths);
 
                 // We add a new URL for each resource that has a swagger ui annotation
                 // This is because swagger ui takes over the entire url space
                 app.Urls.Add("http://127.0.0.1:0");
-
-                // To avoid cors issues, we expose URLs that send requests to the apphost and then forward them to the actual resource
-                foreach (var documentName in annotation.DocumentNames)
-                {
-                    swaggerUiPaths.Add($"swagger/{r.Name}/{documentName}");
-                }
             }
 
             var client = new HttpMessageInvoker(new SocketsHttpHandler());
@@ -109,7 +110,7 @@ public static class SwaggerUIExtensions
 
             app.Map("{*path}", async (HttpContext context, IHttpForwarder forwarder, string? path) =>
             {
-                var endpoint = hostToResourceUrl[context.Connection.LocalPort];
+                var (endpoint, _) = portToResourceMap[context.Connection.LocalPort];
 
                 await forwarder.SendAsync(context, endpoint, client, (c, r) =>
                 {
@@ -122,6 +123,8 @@ public static class SwaggerUIExtensions
 
             var addresses = app.Services.GetRequiredService<IServer>().Features.GetRequiredFeature<IServerAddressesFeature>().Addresses;
 
+            var urls = ImmutableArray.CreateBuilder<UrlSnapshot>();
+
             // Map our index back to the actual address
             var index = 0;
             foreach (var rawAddress in addresses)
@@ -129,13 +132,19 @@ public static class SwaggerUIExtensions
                 var address = BindingAddress.Parse(rawAddress);
 
                 // We map the bound port to the resource URL. This lets us forward requests to the correct resource
-                hostToResourceUrl[address.Port] = hostToResourceUrl[index++];
+                var (_, paths) = portToResourceMap[address.Port] = portToResourceMap[index++];
+
+                // We add the swagger ui endpoint for each resource
+                foreach (var p in paths)
+                {
+                    urls.Add(new UrlSnapshot(rawAddress, $"{rawAddress}/{p}", IsInternal: false));
+                }
             }
 
             await notificationService.PublishUpdateAsync(openApiResource, s => s with
             {
                 State = "Running",
-                Urls = [.. addresses.Zip(swaggerUiPaths, (a, p) => new UrlSnapshot(a, $"{a}/{p}", IsInternal: false))]
+                Urls = urls.ToImmutableArray()
             });
         }
     }
