@@ -40,9 +40,19 @@ public static class SwaggerUIExtensions
         return builder.WithAnnotation(new SwaggerUIAnnotation(documentNames ?? ["v1"], path, builder.GetEndpoint(endpointName)));
     }
 
-    class SwaggerUiHook(ResourceNotificationService notificationService,
-               ResourceLoggerService resourceLoggerService) : IDistributedApplicationLifecycleHook
+    private sealed class SwaggerUiHook(ResourceNotificationService notificationService,
+               ResourceLoggerService resourceLoggerService) : IDistributedApplicationLifecycleHook, IAsyncDisposable
     {
+        private WebApplication? _webApplication;
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_webApplication is not null)
+            {
+                await _webApplication.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+
         public async Task AfterEndpointsAllocatedAsync(DistributedApplicationModel appModel, CancellationToken cancellationToken = default)
         {
             var openApiResource = appModel.Resources.OfType<SwaggerUIResource>().SingleOrDefault();
@@ -55,15 +65,17 @@ public static class SwaggerUIExtensions
             // We host a single webserver that will manage the swagger ui endpoints for all resources
             var builder = WebApplication.CreateSlimBuilder();
 
-            builder.Services.AddHttpForwarder();
+            builder.Services
+                .AddHttpForwarder()
+                .AddSingleton(_ => new HttpMessageInvoker(new SocketsHttpHandler(), true));
+
             builder.Logging.ClearProviders();
+            builder.Services.AddSingleton<ILoggerProvider>(_ => new ResourceLoggerProvider(resourceLoggerService.GetLogger(openApiResource.Name)));
 
-            builder.Logging.AddProvider(new ResourceLoggerProvider(resourceLoggerService.GetLogger(openApiResource.Name)));
-
-            var app = builder.Build();
+            _webApplication = builder.Build();
 
             // openapi/resourcename/documentname.json
-            app.MapSwaggerUI();
+            _webApplication.MapSwaggerUI();
 
             var resourceToEndpoint = new Dictionary<string, (string, string)>();
             var portToResourceMap = new Dictionary<int, (string, List<string>)>();
@@ -86,18 +98,16 @@ public static class SwaggerUIExtensions
                 }
 
                 // We store the URL for the resource on the host so we can map it back to the actual address once they are allocated
-                portToResourceMap[app.Urls.Count] = (annotation.EndpointReference.Url, paths);
+                portToResourceMap[_webApplication.Urls.Count] = (annotation.EndpointReference.Url, paths);
 
                 // We add a new URL for each resource that has a swagger ui annotation
                 // This is because swagger ui takes over the entire url space
-                app.Urls.Add("http://127.0.0.1:0");
+                _webApplication.Urls.Add("http://127.0.0.1:0");
             }
 
-            var client = new HttpMessageInvoker(new SocketsHttpHandler());
-
             // Swagger UI will make requests to the apphost so we can avoid doing any CORS configuration.
-            app.Map("/openapi/{resourceName}/{documentName}.json",
-                async (string resourceName, string documentName, IHttpForwarder forwarder, HttpContext context) =>
+            _webApplication.Map("/openapi/{resourceName}/{documentName}.json",
+                async (string resourceName, string documentName, IHttpForwarder forwarder, HttpMessageInvoker client, HttpContext context) =>
             {
                 var (endpoint, path) = resourceToEndpoint[resourceName];
 
@@ -108,7 +118,7 @@ public static class SwaggerUIExtensions
                 });
             });
 
-            app.Map("{*path}", async (HttpContext context, IHttpForwarder forwarder, string? path) =>
+            _webApplication.Map("{*path}", async (HttpContext context, IHttpForwarder forwarder, HttpMessageInvoker client, string? path) =>
             {
                 var (endpoint, _) = portToResourceMap[context.Connection.LocalPort];
 
@@ -119,9 +129,9 @@ public static class SwaggerUIExtensions
                 });
             });
 
-            await app.StartAsync(cancellationToken);
+            await _webApplication.StartAsync(cancellationToken);
 
-            var addresses = app.Services.GetRequiredService<IServer>().Features.GetRequiredFeature<IServerAddressesFeature>().Addresses;
+            var addresses = _webApplication.Services.GetRequiredService<IServer>().Features.GetRequiredFeature<IServerAddressesFeature>().Addresses;
 
             var urls = ImmutableArray.CreateBuilder<UrlSnapshot>();
 
@@ -149,7 +159,7 @@ public static class SwaggerUIExtensions
         }
     }
 
-    private class ResourceLoggerProvider(ILogger logger) : ILoggerProvider
+    private sealed class ResourceLoggerProvider(ILogger logger) : ILoggerProvider
     {
         public ILogger CreateLogger(string categoryName)
         {
