@@ -7,7 +7,8 @@ Just add `WithSwaggerUI()` to any project resource builder and you are good to g
 ```C#
 var builder = DistributedApplication.CreateBuilder(args);
 
-builder.AddProject<Projects.AspireSwaggerUi_ApiService>("api").WithSwaggerUI();
+builder.AddProject<Projects.AspireSwaggerUi_ApiService>("api")
+    .WithSwaggerUI();
 
 builder.Build().Run();
 ```
