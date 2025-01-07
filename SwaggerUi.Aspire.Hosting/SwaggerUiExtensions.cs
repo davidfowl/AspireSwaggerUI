@@ -112,9 +112,14 @@ public static class SwaggerUIExtensions
             {
                 var (endpoint, _) = portToResourceMap[context.Connection.LocalPort];
 
+                var uriBuilder = new UriBuilder(path is null ? endpoint : $"{endpoint}/{path}")
+                {
+                    Query = context.Request.QueryString.Value
+                };
+
                 await forwarder.SendAsync(context, endpoint, client, (c, r) =>
                 {
-                    r.RequestUri = path is null ? new(endpoint) : new($"{endpoint}/{path}");
+                    r.RequestUri = uriBuilder.Uri;
                     return ValueTask.CompletedTask;
                 });
             });
